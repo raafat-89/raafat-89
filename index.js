@@ -7,7 +7,7 @@ require('dotenv').config();
 const CONFIG = {
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
-    SCAN_INTERVAL: 15000, // الفحص كل 4 ثواني
+    SCAN_INTERVAL: 25000, // الفحص كل 4 ثواني
     REQUIRED_DISCOUNT: 19, // نسبة الخصم المطلوبة
     MAX_AD_AGE_SECONDS: 15, // تجاهل الإعلانات الأقدم من 15 ثانية
     ASSET: 'USDT',

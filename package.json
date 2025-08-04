@@ -1,17 +1,16 @@
 {
-  "name": "p2p-advanced-monitor",
-  "version": "2.0.0",
-  "description": "Advanced multi-currency P2P monitoring bot",
+  "name": "p2p-diagnostic-bot",
+  "version": "1.0.0",
+  "description": "Diagnostic bot to test Binance API connection.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.4.0",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "moment-timezone": "^0.5.43",
-    "node-telegram-bot-api": "^0.61.0"
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-telegram-bot-api": "^0.65.1"
   },
   "engines": {
     "node": "18.x"

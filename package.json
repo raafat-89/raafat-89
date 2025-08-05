@@ -1,0 +1,166 @@
+const express = require('express');
+const axios = require('axios');
+const TelegramBot = require('node-telegram-bot-api');
+const moment = require('moment-timezone');
+require('dotenv').config();
+
+// --- الإعدادات الرئيسية ---
+const CONFIG = {
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
+    SCAN_INTERVAL: 90000, // دورة الفحص الكاملة كل 90 ثانية
+    REPORT_INTERVAL: 300000, // إرسال تقرير كل 5 دقائق (300,000 ميلي ثانية)
+    REQUIRED_DISCOUNT: 5,
+    MAX_AD_AGE_SECONDS: 15,
+    CRYPTO_ASSETS: ['USDT', 'BTC', 'BNB', 'ETH', 'DOGE', 'SHIB'],
+    FIAT_CURRENCIES: ['TRY', 'AED', 'IDR', 'KZT', 'AZN'],
+    COINGECKO_IDS: {
+        'USDT': 'tether', 'BTC': 'bitcoin', 'BNB': 'binancecoin', 'ETH': 'ethereum', 'DOGE': 'dogecoin', 'SHIB': 'shiba-inu'
+    }
+};
+
+// --- ذاكرة مؤقتة للتقارير ---
+let cheapestAdsReport = {};
+
+// --- تهيئة التطبيق والبوت ---
+if (!CONFIG.TELEGRAM_BOT_TOKEN || !CONFIG.TELEGRAM_CHAT_ID) {
+    console.error("خطأ: متغيرات البيئة غير معرفة");
+    process.exit(1);
+}
+const bot = new TelegramBot(CONFIG.TELEGRAM_BOT_TOKEN);
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => res.send('P2P Bot with Reports is alive!'));
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    bot.sendMessage(CONFIG.TELEGRAM_CHAT_ID, '✅ **النسخة المطورة (مع التقارير) بدأت العمل!**').catch(err => console.error(err.message));
+});
+
+// --- الدوال المساعدة ---
+async function getMarketPrice(asset, fiat) {
+    try {
+        const cryptoId = CONFIG.COINGECKO_IDS[asset];
+        const fiatId = fiat.toLowerCase();
+        const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${cryptoId}&vs_currencies=${fiatId}`);
+        const price = response.data[cryptoId]?.[fiatId];
+        if (price) {
+            console.log(`📈 Price for ${asset}/${fiat} from CoinGecko: ${price}`);
+            return price;
+        }
+        return null;
+    } catch (error) {
+        console.error(`CoinGecko price fetch failed for ${asset}/${fiat}: ${error.message}`);
+        return null;
+    }
+}
+
+// دالة لتحديث أرخص إعلان في التقرير
+function updateCheapestAdReport(ad, platform, asset, fiat) {
+    const pairKey = `${asset}/${fiat}`;
+    const adPrice = parseFloat(ad.price);
+
+    if (!cheapestAdsReport[pairKey] || adPrice < cheapestAdsReport[pairKey].price) {
+        cheapestAdsReport[pairKey] = {
+            price: adPrice,
+            nickName: ad.nickName,
+            platform: platform
+        };
+    }
+}
+
+async function processAndSendAlert(ad, platform, asset, fiat, marketPrice) {
+    const price = parseFloat(ad.price);
+    if (!price || !marketPrice) return;
+
+    const createTime = new Date(ad.createTime).getTime();
+    const ageInSeconds = (Date.now() - createTime) / 1000;
+    if (ageInSeconds > CONFIG.MAX_AD_AGE_SECONDS) return;
+
+    const discount = ((marketPrice - price) / marketPrice) * 100;
+    if (discount >= CONFIG.REQUIRED_DISCOUNT) {
+        const timeInTurkey = moment(createTime).tz('Europe/Istanbul').format('YYYY-MM-DD HH:mm:ss');
+        let adLink = `https://p2p.binance.com/en/advertiserDetail?advertiserNo=${ad.advertiserNo}`;
+
+        const message = `
+🔔 **فرصة جديدة على ${platform}** 🔔
+التاجر **${ad.nickName}** يعرض **${asset}** مقابل **${fiat}**.
+خصم: **${discount.toFixed(2)}%**!
+- **وقت الإعلان (تركيا):** ${timeInTurkey}
+- **رابط مباشر:** [اضغط هنا](${adLink})
+        `;
+        try {
+            await bot.sendMessage(CONFIG.TELEGRAM_CHAT_ID, message, { parse_mode: 'Markdown' });
+            console.log(`📤 Alert sent for ${asset}/${fiat} from ${platform}`);
+        } catch (error) {
+            console.error("Telegram send error:", error.message);
+        }
+    }
+}
+
+// --- دوال فحص المنصات ---
+async function checkBinanceP2P(asset, fiat) {
+    try {
+        const { data } = await axios.post('https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search', { page: 1, rows: 10, asset, tradeType: 'SELL', fiat });
+        const ads = data.data.map(item => ({ price: item.adv.price, createTime: item.adv.createTime, nickName: item.advertiser.nickName, advertiserNo: item.advertiser.userNo }));
+        
+        // تحديث التقرير بأرخص إعلان
+        if (ads.length > 0) {
+            updateCheapestAdReport(ads[0], 'Binance', asset, fiat);
+        }
+        return ads;
+    } catch (error) { 
+        console.error(`Binance P2P check failed for ${asset}/${fiat}`);
+        return []; 
+    }
+}
+
+// --- حلقة المراقبة الرئيسية ---
+async function mainMonitoringLoop() {
+    console.log(`\n--- [${moment().tz('Europe/Istanbul').format('HH:mm:ss')}] Starting new scan cycle ---`);
+    cheapestAdsReport = {}; // تفريغ الذاكرة في بداية كل دورة
+
+    for (const fiat of CONFIG.FIAT_CURRENCIES) {
+        for (const crypto of CONFIG.CRYPTO_ASSETS) {
+            const marketPrice = await getMarketPrice(crypto, fiat);
+            if (!marketPrice) {
+                 await new Promise(resolve => setTimeout(resolve, 2000));
+                 continue;
+            }
+            
+            const binanceAds = await checkBinanceP2P(crypto, fiat);
+            for (const ad of binanceAds) await processAndSendAlert(ad, 'Binance', crypto, fiat, marketPrice);
+            
+            // يمكن استدعاء دوال فحص Bybit و KuCoin هنا
+            
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+    }
+}
+
+// --- دالة إرسال التقرير الدوري ---
+async function sendStatusReport() {
+    const time = moment().tz('Europe/Istanbul').format('HH:mm');
+    let reportMessage = `**📊 تقرير الحالة - ${time} بتوقيت تركيا 📊**\n\n`;
+    reportMessage += `البوت يعمل ويراقب السوق. إليك أرخص الأسعار التي وجدتها في آخر دورة فحص:\n\n`;
+
+    if (Object.keys(cheapestAdsReport).length === 0) {
+        reportMessage = `**📊 تقرير الحالة - ${time} بتوقيت تركيا 📊**\n\nالبوت يعمل، لكن لم أجد أي إعلانات في دورة الفحص الأخيرة. سأستمر في المراقبة.`;
+    } else {
+        for (const pair in cheapestAdsReport) {
+            const ad = cheapestAdsReport[pair];
+            reportMessage += `🔸 **${pair}**: ${ad.price} (بواسطة ${ad.nickName} على ${ad.platform})\n`;
+        }
+    }
+
+    try {
+        await bot.sendMessage(CONFIG.TELEGRAM_CHAT_ID, reportMessage, { parse_mode: 'Markdown' });
+    } catch (error) {
+        console.error("Failed to send status report:", error.message);
+    }
+}
+
+// بدء حلقة المراقبة وحلقة التقارير
+setInterval(mainMonitoringLoop, CONFIG.SCAN_INTERVAL);
+setInterval(sendStatusReport, CONFIG.REPORT_INTERVAL);
+mainMonitoringLoop(); // بدء الدورة الأولى فوراً

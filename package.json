@@ -1,0 +1,39 @@
+{
+  "name": "p2p-golden-bot",
+  "version": "6.0.1",
+  "description": "Advanced P2P Monitoring Bot with Real-time Alerts",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "jest",
+    "lint": "eslint .",
+    "audit": "npm audit --production"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "axios-retry": "^4.4.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "https-proxy-agent": "^7.0.5",
+    "moment-timezone": "^0.5.45",
+    "node-telegram-bot-api": "^0.65.1"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": "18.x",
+    "npm": "9.x"
+  },
+  "keywords": [
+    "p2p",
+    "crypto",
+    "binance",
+    "bybit",
+    "kucoin",
+    "telegram-bot"
+  ]
+}
